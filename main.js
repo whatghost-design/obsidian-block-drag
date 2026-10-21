@@ -11,7 +11,8 @@ const QUOTE_RE = /^\s*>/;
 const HEADING_RE = /^(#{1,6})\s/;
 
 const DRAG_THRESHOLD = 4; // 移動超過幾 px 才算拖曳（否則算點擊）
-const HANDLE_GAP = 26; // 把手離文字左緣的距離
+const HANDLE_GAP = 36; // 把手離文字左緣的距離（避開主題畫在 -16px 的目前行標示）
+const FOLD_SPACE = 24; // 標題、清單量不到收合箭頭時，額外再往左讓的距離
 const NEST_OFFSET = 32; // 往右拖超過幾 px 變成子項目
 const NEST_INDICATOR_SHIFT = 24;
 const SCROLL_EDGE = 48; // 拖到上下邊緣多近開始自動捲動
@@ -263,12 +264,15 @@ class BlockDragView {
     if (!coords) return this.hideHandle();
 
     // 標題、清單左邊有 Obsidian 的收合箭頭，把手要讓到它左邊
+    // 箭頭外層容器寬度是 0，要量內層真正的箭頭
     let left = coords.left - HANDLE_GAP;
     const lineEl = this.lineElement(start.from);
-    const fold = lineEl && lineEl.querySelector('.cm-fold-indicator');
-    if (fold) {
-      const r = fold.getBoundingClientRect();
-      if (r.width) left = Math.min(left, r.left - 22);
+    const arrow = lineEl && lineEl.querySelector('.cm-fold-indicator .collapse-indicator, .cm-fold-indicator');
+    const arrowRect = arrow && arrow.getBoundingClientRect();
+    if (arrowRect && arrowRect.width) {
+      left = Math.min(left, arrowRect.left - 22);
+    } else if (HEADING_RE.test(start.text) || LIST_RE.test(start.text)) {
+      left -= FOLD_SPACE;
     }
 
     // 跟第一行文字垂直置中（表格這類整塊元件就對齊頂端）
