@@ -67,6 +67,41 @@
   pointer-events: none;
 }
 
+.wg-drag-ghost.is-preview {
+  position: absolute;
+  z-index: 30;
+  max-width: none;
+  max-height: 240px;
+  padding: 0;
+  background-color: transparent;
+  box-shadow: none;
+  font-size: inherit;
+  white-space: normal;
+  opacity: 0.5;
+}
+
+.wg-ghost-content {
+  padding: 0 !important;
+}
+
+.wg-drop-flash {
+  position: absolute;
+  z-index: 1;
+  border-radius: 4px;
+  background-color: var(--interactive-accent);
+  pointer-events: none;
+  animation: wg-drop-flash 0.9s ease-out forwards;
+}
+
+@keyframes wg-drop-flash {
+  from {
+    opacity: 0.22;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 body.wg-block-dragging,
 body.wg-block-dragging * {
   cursor: grabbing !important;

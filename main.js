@@ -232,6 +232,12 @@ class BlockDragView {
     return rect.left + parseFloat(getComputedStyle(lineEl).paddingLeft || '0');
   }
 
+  lineElement(pos) {
+    const { node } = this.view.domAtPos(pos);
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    return el ? el.closest('.cm-line') : null;
+  }
+
   textLeft(line) {
     const coords = this.view.coordsAtPos(line.from + indentOf(line.text).length, 1);
     return coords ? coords.left : this.baseLeft();
@@ -256,10 +262,21 @@ class BlockDragView {
       this.view.coordsAtPos(start.from + indentOf(start.text).length, 1) || this.view.coordsAtPos(start.from, 1);
     if (!coords) return this.hideHandle();
 
+    // 標題、清單左邊有 Obsidian 的收合箭頭，把手要讓到它左邊
+    let left = coords.left - HANDLE_GAP;
+    const lineEl = this.lineElement(start.from);
+    const fold = lineEl && lineEl.querySelector('.cm-fold-indicator');
+    if (fold) {
+      const r = fold.getBoundingClientRect();
+      if (r.width) left = Math.min(left, r.left - 22);
+    }
+
+    // 跟第一行文字垂直置中（表格這類整塊元件就對齊頂端）
     const box = this.view.dom.getBoundingClientRect();
-    const rowHeight = Math.min(coords.bottom - coords.top, 28);
+    const height = coords.bottom - coords.top;
+    const rowHeight = height > 60 ? 24 : height;
     this.handle.style.top = coords.top - box.top + rowHeight / 2 - 12 + 'px';
-    this.handle.style.left = Math.max(2, coords.left - box.left - HANDLE_GAP) + 'px';
+    this.handle.style.left = Math.max(2, left - box.left) + 'px';
     this.handle.classList.add('is-visible');
     this.hoverRange = range;
   }
@@ -314,8 +331,7 @@ class BlockDragView {
       this.beginDragVisuals();
     }
 
-    d.ghost.style.left = e.clientX + 14 + 'px';
-    d.ghost.style.top = e.clientY + 10 + 'px';
+    this.positionGhost();
     this.updateDropTarget();
   }
 
@@ -327,11 +343,39 @@ class BlockDragView {
     document.body.classList.add('wg-block-dragging');
     this.handle.classList.remove('is-visible');
 
+    // 像 Notion 一樣，讓區塊本身半透明地跟著滑鼠走；畫面上抓不到內容時退回文字標籤
+    const lineEls = [];
+    const lastPreview = Math.min(d.range.end, d.range.start + 11);
+    for (let n = d.range.start; n <= lastPreview; n++) {
+      const from = doc.line(n).from;
+      if (from < this.view.viewport.from || from > this.view.viewport.to) break;
+      const el = this.lineElement(from);
+      if (!el) {
+        lineEls.length = 0;
+        break;
+      }
+      if (!lineEls.includes(el)) lineEls.push(el);
+    }
+
     d.ghost = document.createElement('div');
-    d.ghost.className = 'wg-drag-ghost';
-    const label = previewText(doc.line(d.range.start).text).slice(0, 60) || '（區塊）';
-    d.ghost.textContent = lineCount > 1 ? `${label}　+${lineCount - 1} 行` : label;
-    document.body.append(d.ghost);
+    if (lineEls.length) {
+      const first = lineEls[0].getBoundingClientRect();
+      const content = document.createElement('div');
+      content.className = 'cm-content wg-ghost-content';
+      for (const el of lineEls) content.append(el.cloneNode(true));
+      d.ghost.className = 'wg-drag-ghost is-preview';
+      d.ghost.style.width = first.width + 'px';
+      d.ghost.append(content);
+      d.grabX = d.startX - first.left;
+      d.grabY = d.startY - first.top;
+      this.view.dom.append(d.ghost);
+    } else {
+      d.ghost.className = 'wg-drag-ghost';
+      const label = previewText(doc.line(d.range.start).text).slice(0, 60) || '（區塊）';
+      d.ghost.textContent = lineCount > 1 ? `${label}　+${lineCount - 1} 行` : label;
+      document.body.append(d.ghost);
+    }
+    this.positionGhost();
 
     this.positionSource();
     this.source.style.display = 'block';
@@ -351,6 +395,19 @@ class BlockDragView {
       this.drag.scrollRaf = requestAnimationFrame(tick);
     };
     d.scrollRaf = requestAnimationFrame(tick);
+  }
+
+  positionGhost() {
+    const d = this.drag;
+    if (!d.ghost) return;
+    if (d.ghost.classList.contains('is-preview')) {
+      const box = this.view.dom.getBoundingClientRect();
+      d.ghost.style.left = d.lastX - d.grabX - box.left + 'px';
+      d.ghost.style.top = d.lastY - d.grabY - box.top + 'px';
+    } else {
+      d.ghost.style.left = d.lastX + 14 + 'px';
+      d.ghost.style.top = d.lastY + 10 + 'px';
+    }
   }
 
   positionSource() {
@@ -532,25 +589,83 @@ class BlockDragView {
       .map((t) => reindent(t, oldIndent, newIndent))
       .join('\n');
 
+    // 游標不跟著跳進被搬的區塊，免得即時預覽把 ## 、- 這些語法露出來
     // 原地只改縮排
     if (gap === range.start || gap === range.end + 1) {
-      view.dispatch({
-        changes: { from: startLine.from, to: endLine.to, insert: text },
-        selection: { anchor: startLine.from },
-        userEvent: 'move.drag',
-      });
-      view.focus();
+      view.dispatch({ changes: { from: startLine.from, to: endLine.to, insert: text }, userEvent: 'move.drag' });
+      this.flash(startLine.from, startLine.from + text.length);
       return;
     }
 
-    const del = this.deletionRange(range);
-    const insPos = gap <= doc.lines ? doc.line(gap).from : doc.length;
-    const insText = gap <= doc.lines ? text + '\n' : '\n' + text;
+    // 空行處理：照新位置附近的排版決定前後要不要隔一個空行
+    const { fmEnd } = getStructure(doc);
+    const exists = (n) => n > fmEnd && n >= 1 && n <= doc.lines;
+    const isBlank = (n) => exists(n) && !doc.line(n).text.trim();
+    const isList = (n) => exists(n) && LIST_RE.test(doc.line(n).text);
+    const movedIsList = LIST_RE.test(startLine.text);
+    const spaced = isBlank(range.start - 1) || isBlank(range.end + 1);
 
-    const changes = view.state.changes([del, { from: insPos, insert: insText }]);
-    const anchor = changes.mapPos(insPos, -1) + (gap > doc.lines ? 1 : 0);
-    view.dispatch({ changes, selection: { anchor }, userEvent: 'move.drag' });
-    view.focus();
+    const prevNo = gap - 1;
+    const nextNo = gap;
+    const prevBlank = exists(prevNo) ? isBlank(prevNo) : spaced;
+    const nextBlank = exists(nextNo) ? isBlank(nextNo) : spaced;
+    const blankBefore = exists(prevNo) && !prevBlank && nextBlank && !(movedIsList && isList(prevNo));
+    const blankAfter = exists(nextNo) && !nextBlank && prevBlank && !(movedIsList && isList(nextNo));
+
+    let insPos, insText, lead;
+    if (gap <= doc.lines) {
+      insPos = doc.line(gap).from;
+      insText = (blankBefore ? '\n' : '') + text + '\n' + (blankAfter ? '\n' : '');
+      lead = blankBefore ? 1 : 0;
+    } else {
+      insPos = doc.length;
+      insText = '\n' + (blankBefore ? '\n' : '') + text;
+      lead = blankBefore ? 2 : 1;
+    }
+
+    const changes = view.state.changes([this.deletionRange(this.removalRange(range)), { from: insPos, insert: insText }]);
+    const newFrom = changes.mapPos(insPos, -1) + lead;
+    view.dispatch({ changes, userEvent: 'move.drag' });
+    this.flash(newFrom, newFrom + text.length);
+  }
+
+  // 拿走區塊時，如果前後都是空行就順手帶走一個，避免原位置留下兩個空行
+  removalRange(range) {
+    const doc = this.view.state.doc;
+    const { fmEnd } = getStructure(doc);
+    const isBlank = (n) => n > fmEnd && n >= 1 && n <= doc.lines && !doc.line(n).text.trim();
+    const atTop = range.start === fmEnd + 1;
+
+    if (isBlank(range.end + 1) && (isBlank(range.start - 1) || atTop)) return { start: range.start, end: range.end + 1 };
+    if (isBlank(range.start - 1) && range.end === doc.lines) return { start: range.start - 1, end: range.end };
+    return range;
+  }
+
+  // 放下後在新位置閃一下，讓人知道東西去哪了
+  flash(from, to) {
+    this.view.requestMeasure({
+      read: (view) => {
+        const box = view.dom.getBoundingClientRect();
+        const lineEl = view.contentDOM.querySelector('.cm-line');
+        const lineRect = lineEl ? lineEl.getBoundingClientRect() : view.contentDOM.getBoundingClientRect();
+        return {
+          top: view.lineBlockAt(from).top + view.documentTop - box.top,
+          bottom: view.lineBlockAt(to).bottom + view.documentTop - box.top,
+          left: lineRect.left - box.left,
+          width: lineRect.width,
+        };
+      },
+      write: (m) => {
+        const el = document.createElement('div');
+        el.className = 'wg-drop-flash';
+        el.style.top = m.top + 'px';
+        el.style.height = m.bottom - m.top + 'px';
+        el.style.left = m.left + 'px';
+        el.style.width = m.width + 'px';
+        this.view.dom.append(el);
+        setTimeout(() => el.remove(), 900);
+      },
+    });
   }
 
   // 刪掉區塊時連換行一起刪，避免留空行
@@ -635,14 +750,16 @@ class BlockDragView {
         .setIcon('copy')
         .onClick(() => {
           const doc = view.state.doc;
+          const startLine = doc.line(range.start);
           const endLine = doc.line(range.end);
-          const text = doc.sliceString(doc.line(range.start).from, endLine.to);
-          view.dispatch({
-            changes: { from: endLine.to, insert: '\n' + text },
-            selection: { anchor: endLine.to + 1 },
-            userEvent: 'input.duplicate',
-          });
-          view.focus();
+          const text = doc.sliceString(startLine.from, endLine.to);
+          // 原本跟上下隔空行的，複製品也隔一個空行；清單項目就緊貼
+          const nextBlank = range.end < doc.lines && !doc.line(range.end + 1).text.trim();
+          const prevBlank = range.start > 1 && !doc.line(range.start - 1).text.trim();
+          const sep = !LIST_RE.test(startLine.text) && (nextBlank || prevBlank) ? '\n\n' : '\n';
+          view.dispatch({ changes: { from: endLine.to, insert: sep + text }, userEvent: 'input.duplicate' });
+          const from = endLine.to + sep.length;
+          this.flash(from, from + text.length);
         })
     );
     menu.addItem((item) =>
@@ -650,8 +767,7 @@ class BlockDragView {
         .setTitle('刪除')
         .setIcon('trash-2')
         .onClick(() => {
-          view.dispatch({ changes: this.deletionRange(range), userEvent: 'delete.block' });
-          view.focus();
+          view.dispatch({ changes: this.deletionRange(this.removalRange(range)), userEvent: 'delete.block' });
         })
     );
     menu.showAtMouseEvent(e);
