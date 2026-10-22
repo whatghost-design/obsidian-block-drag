@@ -80,8 +80,27 @@
   opacity: 0.5;
 }
 
-.wg-ghost-content {
+.cm-editor > .wg-drag-ghost.is-preview {
+  width: var(--wg-ghost-width) !important;
+  min-width: var(--wg-ghost-width) !important;
+  max-width: none !important;
+  writing-mode: horizontal-tb !important;
+}
+
+.wg-drag-ghost.is-preview .wg-ghost-content {
+  display: block !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: none !important;
   padding: 0 !important;
+  flex: none !important;
+}
+
+.wg-drag-ghost.is-preview .wg-ghost-content > * {
+  width: auto !important;
+  max-width: none !important;
+  white-space: pre-wrap !important;
+  writing-mode: horizontal-tb !important;
 }
 
 .wg-drop-flash {

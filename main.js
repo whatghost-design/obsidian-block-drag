@@ -356,11 +356,17 @@ class BlockDragView {
     d.ghost = document.createElement('div');
     if (lineEls.length) {
       const first = lineEls[0].getBoundingClientRect();
+      // 寬度一定要鎖死，否則會被編輯器既有的版面規則壓窄，中文變成一字一行
+      const width = first.width >= 100 ? first.width : this.view.contentDOM.getBoundingClientRect().width;
       const content = document.createElement('div');
       content.className = 'cm-content wg-ghost-content';
-      for (const el of lineEls) content.append(el.cloneNode(true));
+      for (const el of lineEls) {
+        const clone = el.cloneNode(true);
+        clone.classList.remove('cm-active');
+        content.append(clone);
+      }
       d.ghost.className = 'wg-drag-ghost is-preview';
-      d.ghost.style.width = first.width + 'px';
+      d.ghost.style.setProperty('--wg-ghost-width', width + 'px');
       d.ghost.append(content);
       d.grabX = d.startX - first.left;
       d.grabY = d.startY - first.top;
