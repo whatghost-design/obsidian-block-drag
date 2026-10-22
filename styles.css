@@ -41,6 +41,21 @@
   display: none;
 }
 
+/* 拖標題時顯示會變成幾級，例如 H3 */
+.wg-drop-badge {
+  position: absolute;
+  left: -2px;
+  bottom: 5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  line-height: 1.4;
+  display: none;
+}
+
 .wg-drag-source {
   position: absolute;
   z-index: 1;

@@ -15,6 +15,7 @@ const HANDLE_GAP = 36; // 把手離文字左緣的距離（避開主題畫在 -1
 const FOLD_SPACE = 8; // 標題、清單左邊有收合箭頭，額外再往左讓的距離
 const NEST_OFFSET = 32; // 往右拖超過幾 px 變成子項目
 const NEST_INDICATOR_SHIFT = 24;
+const LEVEL_STEP = 40; // 拖標題時左右每移動幾 px 升／降一級
 const SCROLL_EDGE = 48; // 拖到上下邊緣多近開始自動捲動
 
 function indentOf(text) {
@@ -172,6 +173,9 @@ class BlockDragView {
 
     this.indicator = document.createElement('div');
     this.indicator.className = 'wg-drop-indicator';
+    this.badge = document.createElement('div');
+    this.badge.className = 'wg-drop-badge';
+    this.indicator.append(this.badge);
 
     this.source = document.createElement('div');
     this.source.className = 'wg-drag-source';
@@ -457,9 +461,13 @@ class BlockDragView {
       gap = y - view.documentTop < (top + bottom) / 2 ? first : last + 1;
     }
 
-    // 拖整個標題章節：只能放在章節交界，不能插進別的章節中間
+    // 拖整個標題章節：只能放在標題前面（章節交界），左右位置決定變成幾級標題
     const movedLevel = headingLevel(doc, group, range.start);
-    if (movedLevel) gap = this.snapHeadingGap(movedLevel, y);
+    let targetLevel = 0;
+    if (movedLevel) {
+      gap = this.snapHeadingGap(range, y);
+      targetLevel = this.pickHeadingLevel(range, gap, movedLevel, x - d.startX);
+    }
 
     // 不能放進自己裡面
     if (gap > range.start && gap <= range.end) return this.clearTarget();
@@ -514,9 +522,16 @@ class BlockDragView {
 
     const oldIndent = indentOf(doc.line(range.start).text);
     const inPlace = gap === range.start || gap === range.end + 1;
-    if (inPlace && newIndent === oldIndent) return this.clearTarget();
+    if (inPlace && newIndent === oldIndent && targetLevel === movedLevel) return this.clearTarget();
 
-    d.target = { gap, newIndent };
+    d.target = { gap, newIndent, levelDelta: targetLevel - movedLevel };
+    if (movedLevel) {
+      this.badge.textContent = 'H' + targetLevel;
+      this.badge.style.display = 'block';
+      indicatorLeft += (targetLevel - 1) * 12;
+    } else {
+      this.badge.style.display = 'none';
+    }
 
     const box = view.dom.getBoundingClientRect();
     const gapY = gap <= doc.lines ? view.lineBlockAt(doc.line(gap).from).top : view.lineBlockAt(doc.length).bottom;
@@ -529,8 +544,8 @@ class BlockDragView {
     this.indicator.style.display = 'block';
   }
 
-  // 找離滑鼠最近的章節交界：文件開頭、同級或更大的標題前、文件結尾
-  snapHeadingGap(level, clientY) {
+  // 找離滑鼠最近的章節交界：任何標題前面、文件結尾
+  snapHeadingGap(range, clientY) {
     const view = this.view;
     const doc = view.state.doc;
     const { fmEnd, group } = getStructure(doc);
@@ -547,13 +562,38 @@ class BlockDragView {
       }
     };
 
-    if (fmEnd + 1 <= doc.lines) consider(fmEnd + 1);
-    for (let j = fmEnd + 2; j <= doc.lines; j++) {
-      const l = headingLevel(doc, group, j);
-      if (l && l <= level) consider(j);
+    for (let j = fmEnd + 1; j <= doc.lines; j++) {
+      if (j > range.start && j <= range.end) continue;
+      if (headingLevel(doc, group, j)) consider(j);
     }
     consider(doc.lines + 1);
     return best;
+  }
+
+  // 落點能接受的標題層級：
+  // 最深只能比上一個標題多一級；最淺不能比下一個標題淺（否則會把下一章吞進來）
+  pickHeadingLevel(range, gap, level, dx) {
+    const doc = this.view.state.doc;
+    const { fmEnd, group } = getStructure(doc);
+
+    let parent = 0;
+    for (let p = gap - 1; p > fmEnd; p--) {
+      if (p >= range.start && p <= range.end) continue;
+      const l = headingLevel(doc, group, p);
+      if (l) {
+        parent = l;
+        break;
+      }
+    }
+
+    let n = gap >= range.start && gap <= range.end + 1 ? range.end + 1 : gap;
+    while (n <= doc.lines && !doc.line(n).text.trim()) n++;
+    const next = n <= doc.lines ? headingLevel(doc, group, n) : 0;
+
+    const lower = Math.max(1, next || 1);
+    const upper = Math.max(lower, parent ? Math.min(6, parent + 1) : 6);
+    const wanted = level + Math.round(dx / LEVEL_STEP);
+    return Math.min(upper, Math.max(lower, wanted));
   }
 
   clearTarget() {
@@ -584,21 +624,30 @@ class BlockDragView {
       this.openMenu(e, d.range);
       return;
     }
-    if (d.target) this.moveBlock(d.range, d.target.gap, d.target.newIndent);
+    if (d.target) this.moveBlock(d.range, d.target.gap, d.target.newIndent, d.target.levelDelta);
   }
 
   // ── 編輯動作 ──
 
-  moveBlock(range, gap, newIndent) {
+  // levelDelta：標題要升降幾級（章節裡的子標題一起調，程式碼區塊裡的 # 不動）
+  moveBlock(range, gap, newIndent, levelDelta = 0) {
     const view = this.view;
     const doc = view.state.doc;
+    const { fmEnd, group } = getStructure(doc);
     const startLine = doc.line(range.start);
     const endLine = doc.line(range.end);
     const oldIndent = indentOf(startLine.text);
     const text = doc
       .sliceString(startLine.from, endLine.to)
       .split('\n')
-      .map((t) => reindent(t, oldIndent, newIndent))
+      .map((t, i) => {
+        const out = reindent(t, oldIndent, newIndent);
+        if (!levelDelta || group[range.start + i]) return out;
+        return out.replace(HEADING_RE, (m, hashes) => {
+          const lv = Math.min(6, Math.max(1, hashes.length + levelDelta));
+          return '#'.repeat(lv) + m.slice(hashes.length);
+        });
+      })
       .join('\n');
 
     // 游標不跟著跳進被搬的區塊，免得即時預覽把 ## 、- 這些語法露出來
@@ -610,7 +659,6 @@ class BlockDragView {
     }
 
     // 空行處理：照新位置附近的排版決定前後要不要隔一個空行
-    const { fmEnd } = getStructure(doc);
     const exists = (n) => n > fmEnd && n >= 1 && n <= doc.lines;
     const isBlank = (n) => exists(n) && !doc.line(n).text.trim();
     const isList = (n) => exists(n) && LIST_RE.test(doc.line(n).text);

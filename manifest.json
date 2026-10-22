@@ -1,7 +1,7 @@
 {
   "id": "wg-block-drag",
   "name": "區塊拖曳 Block Drag",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "minAppVersion": "1.4.0",
   "description": "像 Notion 一樣，每一行前面都有可拖曳的把手，拖曳搬移區塊。",
   "author": "whatghost_design",
