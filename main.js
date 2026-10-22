@@ -286,6 +286,7 @@ class BlockDragView {
 
   startPointer(e) {
     if (e.button !== 0 || !this.hoverRange) return;
+    if (this.drag) this.endDrag(null);
     e.preventDefault();
     e.stopPropagation();
     this.handle.setPointerCapture(e.pointerId);
@@ -308,9 +309,13 @@ class BlockDragView {
       if (ev.key === 'Escape') this.endDrag(null);
     };
 
+    // 截圖工具、切換視窗這類情況會搶走滑鼠，收不到放開的訊號 → 一律取消拖曳，不留半套狀態
     this.handle.addEventListener('pointermove', drag.onMove);
     this.handle.addEventListener('pointerup', drag.onUp);
     this.handle.addEventListener('pointercancel', drag.onCancel);
+    this.handle.addEventListener('lostpointercapture', drag.onCancel);
+    window.addEventListener('blur', drag.onCancel);
+    document.addEventListener('visibilitychange', drag.onCancel);
     window.addEventListener('keydown', drag.onKey, true);
     this.drag = drag;
   }
@@ -318,6 +323,8 @@ class BlockDragView {
   onDragMove(e) {
     const d = this.drag;
     if (!d) return;
+    // 滑鼠其實已經放開了（放開的訊號被別的程式吃掉）→ 取消
+    if (e.buttons === 0) return this.endDrag(null);
     d.lastX = e.clientX;
     d.lastY = e.clientY;
 
@@ -562,6 +569,9 @@ class BlockDragView {
     this.handle.removeEventListener('pointermove', d.onMove);
     this.handle.removeEventListener('pointerup', d.onUp);
     this.handle.removeEventListener('pointercancel', d.onCancel);
+    this.handle.removeEventListener('lostpointercapture', d.onCancel);
+    window.removeEventListener('blur', d.onCancel);
+    document.removeEventListener('visibilitychange', d.onCancel);
     window.removeEventListener('keydown', d.onKey, true);
     if (d.scrollRaf) cancelAnimationFrame(d.scrollRaf);
     if (d.ghost) d.ghost.remove();
