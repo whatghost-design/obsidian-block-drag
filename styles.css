@@ -56,15 +56,19 @@
   display: none;
 }
 
-/* 會被搬走的範圍：淡淡的主題色底＋左側一條色線，跟 Notion 選取區塊的感覺一樣 */
+/* 會被搬走的範圍：只用一層很淡的主題色底，不加線條，跟 Notion 選取區塊一樣安靜 */
 .wg-drag-source {
   position: absolute;
   z-index: 1;
-  border-radius: 4px;
-  background-color: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--interactive-accent) 70%, transparent);
+  border-radius: 6px;
+  background-color: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
   pointer-events: none;
-  display: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.wg-drag-source.is-visible {
+  opacity: 1;
 }
 
 .wg-drag-ghost {

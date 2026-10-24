@@ -303,11 +303,11 @@ class BlockDragView {
 
   showSource(range) {
     this.positionSource(range);
-    this.source.style.display = 'block';
+    this.source.classList.add('is-visible');
   }
 
   hideSource() {
-    this.source.style.display = 'none';
+    this.source.classList.remove('is-visible');
   }
 
   // ── 拖曳 ──
@@ -454,10 +454,15 @@ class BlockDragView {
     const lineEl = this.view.contentDOM.querySelector('.cm-line');
     const lineRect = lineEl ? lineEl.getBoundingClientRect() : this.view.contentDOM.getBoundingClientRect();
 
-    this.source.style.top = top - box.top + 'px';
-    this.source.style.height = bottom - top + 'px';
-    this.source.style.left = lineRect.left - box.left + 'px';
-    this.source.style.width = lineRect.width + 'px';
+    // 框的左緣對齊這塊內容的起點（子項目只框子項目），四周留一點呼吸空間
+    const padX = 6;
+    const padY = 2;
+    const left = Math.max(lineRect.left, this.textLeft(doc.line(range.start))) - padX;
+
+    this.source.style.top = top - box.top - padY + 'px';
+    this.source.style.height = bottom - top + padY * 2 + 'px';
+    this.source.style.left = left - box.left + 'px';
+    this.source.style.width = lineRect.right - left + padX + 'px';
   }
 
   // 算出落點：插在第幾行之前（gap），以及搬過去之後的縮排
