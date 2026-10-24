@@ -195,19 +195,32 @@ class BlockDragView {
       if (!this.drag) this.hideHandle();
     };
     this.onScroll = () => {
-      if (!this.drag) this.hideHandle();
+      if (this.drag) return;
+      this.hideHandle();
+      if (this.menuRange) this.positionSource(this.menuRange);
     };
     this.onPointerDown = (e) => this.startPointer(e);
+
+    // 滑到把手上就把「會被一起搬走的範圍」整塊標出來
+    this.onHandleEnter = () => {
+      if (!this.drag && this.hoverRange) this.showSource(this.hoverRange);
+    };
+    this.onHandleLeave = () => {
+      if (!this.drag && !this.menuRange) this.hideSource();
+    };
 
     view.dom.addEventListener('mousemove', this.onMouseMove);
     view.dom.addEventListener('mouseleave', this.onMouseLeave);
     view.scrollDOM.addEventListener('scroll', this.onScroll);
     this.handle.addEventListener('pointerdown', this.onPointerDown);
+    this.handle.addEventListener('mouseenter', this.onHandleEnter);
+    this.handle.addEventListener('mouseleave', this.onHandleLeave);
   }
 
   update(update) {
     if (!update.docChanged) return;
     if (this.drag) this.endDrag(null);
+    this.menuRange = null;
     this.hideHandle();
   }
 
@@ -279,11 +292,22 @@ class BlockDragView {
     this.handle.style.left = Math.max(2, left - box.left) + 'px';
     this.handle.classList.add('is-visible');
     this.hoverRange = range;
+    if (!this.menuRange && this.handle.matches(':hover')) this.showSource(range);
   }
 
   hideHandle() {
     this.handle.classList.remove('is-visible');
     this.hoverRange = null;
+    if (!this.drag && !this.menuRange) this.hideSource();
+  }
+
+  showSource(range) {
+    this.positionSource(range);
+    this.source.style.display = 'block';
+  }
+
+  hideSource() {
+    this.source.style.display = 'none';
   }
 
   // ── 拖曳 ──
@@ -390,8 +414,7 @@ class BlockDragView {
     }
     this.positionGhost();
 
-    this.positionSource();
-    this.source.style.display = 'block';
+    this.showSource(d.range);
 
     const tick = () => {
       if (!this.drag || !this.drag.active) return;
@@ -402,7 +425,7 @@ class BlockDragView {
       else if (y > r.bottom - SCROLL_EDGE) dy = Math.ceil((y - (r.bottom - SCROLL_EDGE)) / 3);
       if (dy) {
         this.view.scrollDOM.scrollTop += dy;
-        this.positionSource();
+        this.positionSource(this.drag.range);
         this.updateDropTarget();
       }
       this.drag.scrollRaf = requestAnimationFrame(tick);
@@ -423,8 +446,7 @@ class BlockDragView {
     }
   }
 
-  positionSource() {
-    const { range } = this.drag;
+  positionSource(range) {
     const doc = this.view.state.doc;
     const box = this.view.dom.getBoundingClientRect();
     const top = this.view.lineBlockAt(doc.line(range.start).from).top + this.view.documentTop;
@@ -617,7 +639,7 @@ class BlockDragView {
     if (d.ghost) d.ghost.remove();
     document.body.classList.remove('wg-block-dragging');
     this.indicator.style.display = 'none';
-    this.source.style.display = 'none';
+    this.hideSource();
 
     if (!e) return;
     if (!d.active) {
@@ -783,6 +805,14 @@ class BlockDragView {
   openMenu(e, range) {
     const view = this.view;
     const menu = new Menu();
+
+    // 選單開著的時候，標示維持在這一塊，讓人知道選單動作會套用在哪些內容
+    this.menuRange = range;
+    this.showSource(range);
+    menu.onHide(() => {
+      this.menuRange = null;
+      this.hideSource();
+    });
     const indent = () => indentOf(view.state.doc.line(range.start).text);
 
     menu.addItem((item) =>
