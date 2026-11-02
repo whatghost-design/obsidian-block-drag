@@ -33,10 +33,10 @@
 .wg-drop-indicator {
   position: absolute;
   z-index: 20;
-  height: 3px;
-  border-radius: 2px;
-  background-color: var(--interactive-accent);
-  box-shadow: 0 0 0 1px var(--background-primary);
+  height: 5px;
+  border-radius: 3px;
+  /* 粗一點但顏色淡一點：看得到，又不會太搶 */
+  background-color: color-mix(in srgb, var(--interactive-accent) 50%, transparent);
   pointer-events: none;
   display: none;
 }
@@ -49,7 +49,7 @@
   top: 50%;
   width: 8px;
   height: 8px;
-  border: 2px solid var(--interactive-accent);
+  border: 2px solid color-mix(in srgb, var(--interactive-accent) 60%, transparent);
   border-radius: 50%;
   background-color: var(--background-primary);
   transform: translateY(-50%);

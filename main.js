@@ -580,7 +580,7 @@ class BlockDragView {
     const a = this.localPoint(indicatorLeft, gapY + view.documentTop);
     const b = this.localPoint(right, 0);
 
-    this.indicator.style.top = a.y - 1.5 + 'px';
+    this.indicator.style.top = a.y - 2.5 + 'px';
     this.indicator.style.left = a.x + 'px';
     this.indicator.style.width = Math.max(40, Math.min(b.x, b.maxX - 2) - a.x) + 'px';
     this.indicator.style.display = 'block';
