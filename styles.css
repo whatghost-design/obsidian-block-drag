@@ -36,9 +36,23 @@
   height: 3px;
   border-radius: 2px;
   background-color: var(--interactive-accent);
-  opacity: 0.75;
+  box-shadow: 0 0 0 1px var(--background-primary);
   pointer-events: none;
   display: none;
+}
+
+/* 線頭的小圓圈：一眼看出「會插在這裡」，也看得出縮排從哪開始 */
+.wg-drop-indicator::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--interactive-accent);
+  border-radius: 50%;
+  background-color: var(--background-primary);
+  transform: translateY(-50%);
 }
 
 /* 拖標題時顯示會變成幾級，例如 H3 */
@@ -92,13 +106,14 @@
   position: absolute;
   z-index: 30;
   max-width: none;
-  max-height: 240px;
+  max-height: 160px;
   padding: 0;
   background-color: transparent;
   box-shadow: none;
   font-size: inherit;
   white-space: normal;
-  opacity: 0.5;
+  /* 淡一點，才看得到底下的落點線 */
+  opacity: 0.3;
 }
 
 .cm-editor > .wg-drag-ghost.is-preview {

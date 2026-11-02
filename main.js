@@ -180,7 +180,10 @@ class BlockDragView {
     this.source = document.createElement('div');
     this.source.className = 'wg-drag-source';
 
-    view.dom.append(this.source, this.indicator, this.handle);
+    // 色塊和落點線放進會捲動的那一層，捲動時跟著內容走，不會停在螢幕上亂飄
+    if (getComputedStyle(view.scrollDOM).position === 'static') view.scrollDOM.style.position = 'relative';
+    view.scrollDOM.append(this.source, this.indicator);
+    view.dom.append(this.handle);
 
     this.onMouseMove = (e) => {
       if (this.drag) return;
@@ -195,9 +198,12 @@ class BlockDragView {
       if (!this.drag) this.hideHandle();
     };
     this.onScroll = () => {
-      if (this.drag) return;
+      // 拖曳中用滾輪捲動：滑鼠底下換了一行，落點要重算
+      if (this.drag) {
+        if (this.drag.active) this.updateDropTarget();
+        return;
+      }
       this.hideHandle();
-      if (this.menuRange) this.positionSource(this.menuRange);
     };
     this.onPointerDown = (e) => this.startPointer(e);
 
@@ -248,6 +254,17 @@ class BlockDragView {
     if (!lineEl) return this.view.contentDOM.getBoundingClientRect().left;
     const rect = lineEl.getBoundingClientRect();
     return rect.left + parseFloat(getComputedStyle(lineEl).paddingLeft || '0');
+  }
+
+  // 螢幕座標 → 捲動層裡的座標（已含捲動距離）
+  localPoint(clientX, clientY) {
+    const s = this.view.scrollDOM;
+    const r = s.getBoundingClientRect();
+    return {
+      x: clientX - r.left - s.clientLeft + s.scrollLeft,
+      y: clientY - r.top - s.clientTop + s.scrollTop,
+      maxX: s.scrollLeft + s.clientWidth,
+    };
   }
 
   lineElement(pos) {
@@ -423,11 +440,7 @@ class BlockDragView {
       let dy = 0;
       if (y < r.top + SCROLL_EDGE) dy = -Math.ceil((r.top + SCROLL_EDGE - y) / 3);
       else if (y > r.bottom - SCROLL_EDGE) dy = Math.ceil((y - (r.bottom - SCROLL_EDGE)) / 3);
-      if (dy) {
-        this.view.scrollDOM.scrollTop += dy;
-        this.positionSource(this.drag.range);
-        this.updateDropTarget();
-      }
+      if (dy) this.view.scrollDOM.scrollTop += dy;
       this.drag.scrollRaf = requestAnimationFrame(tick);
     };
     d.scrollRaf = requestAnimationFrame(tick);
@@ -448,7 +461,6 @@ class BlockDragView {
 
   positionSource(range) {
     const doc = this.view.state.doc;
-    const box = this.view.dom.getBoundingClientRect();
     const top = this.view.lineBlockAt(doc.line(range.start).from).top + this.view.documentTop;
     const bottom = this.view.lineBlockAt(doc.line(range.end).from).bottom + this.view.documentTop;
     const lineEl = this.view.contentDOM.querySelector('.cm-line');
@@ -458,11 +470,13 @@ class BlockDragView {
     const padX = 6;
     const padY = 2;
     const left = Math.max(lineRect.left, this.textLeft(doc.line(range.start))) - padX;
+    const a = this.localPoint(left, top - padY);
+    const b = this.localPoint(lineRect.right + padX, bottom + padY);
 
-    this.source.style.top = top - box.top - padY + 'px';
-    this.source.style.height = bottom - top + padY * 2 + 'px';
-    this.source.style.left = left - box.left + 'px';
-    this.source.style.width = lineRect.right - left + padX + 'px';
+    this.source.style.top = a.y + 'px';
+    this.source.style.height = b.y - a.y + 'px';
+    this.source.style.left = a.x + 'px';
+    this.source.style.width = Math.min(b.x, b.maxX) - a.x + 'px';
   }
 
   // 算出落點：插在第幾行之前（gap），以及搬過去之後的縮排
@@ -560,14 +574,15 @@ class BlockDragView {
       this.badge.style.display = 'none';
     }
 
-    const box = view.dom.getBoundingClientRect();
     const gapY = gap <= doc.lines ? view.lineBlockAt(doc.line(gap).from).top : view.lineBlockAt(doc.length).bottom;
     const lineEl = view.contentDOM.querySelector('.cm-line');
     const right = lineEl ? lineEl.getBoundingClientRect().right : view.contentDOM.getBoundingClientRect().right;
+    const a = this.localPoint(indicatorLeft, gapY + view.documentTop);
+    const b = this.localPoint(right, 0);
 
-    this.indicator.style.top = gapY + view.documentTop - box.top - 1.5 + 'px';
-    this.indicator.style.left = indicatorLeft - box.left + 'px';
-    this.indicator.style.width = Math.max(40, right - indicatorLeft) + 'px';
+    this.indicator.style.top = a.y - 1.5 + 'px';
+    this.indicator.style.left = a.x + 'px';
+    this.indicator.style.width = Math.max(40, Math.min(b.x, b.maxX - 2) - a.x) + 'px';
     this.indicator.style.display = 'block';
   }
 
@@ -732,15 +747,11 @@ class BlockDragView {
   flash(from, to) {
     this.view.requestMeasure({
       read: (view) => {
-        const box = view.dom.getBoundingClientRect();
         const lineEl = view.contentDOM.querySelector('.cm-line');
         const lineRect = lineEl ? lineEl.getBoundingClientRect() : view.contentDOM.getBoundingClientRect();
-        return {
-          top: view.lineBlockAt(from).top + view.documentTop - box.top,
-          bottom: view.lineBlockAt(to).bottom + view.documentTop - box.top,
-          left: lineRect.left - box.left,
-          width: lineRect.width,
-        };
+        const a = this.localPoint(lineRect.left, view.lineBlockAt(from).top + view.documentTop);
+        const b = this.localPoint(lineRect.right, view.lineBlockAt(to).bottom + view.documentTop);
+        return { top: a.y, bottom: b.y, left: a.x, width: Math.min(b.x, b.maxX) - a.x };
       },
       write: (m) => {
         const el = document.createElement('div');
@@ -749,7 +760,7 @@ class BlockDragView {
         el.style.height = m.bottom - m.top + 'px';
         el.style.left = m.left + 'px';
         el.style.width = m.width + 'px';
-        this.view.dom.append(el);
+        this.view.scrollDOM.append(el);
         setTimeout(() => el.remove(), 900);
       },
     });
