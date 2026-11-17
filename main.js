@@ -175,7 +175,10 @@ class BlockDragView {
     this.indicator.className = 'wg-drop-indicator';
     this.badge = document.createElement('div');
     this.badge.className = 'wg-drop-badge';
-    this.indicator.append(this.badge);
+    this.copyTag = document.createElement('div');
+    this.copyTag.className = 'wg-drop-copy';
+    this.copyTag.textContent = '＋ 複製';
+    this.indicator.append(this.badge, this.copyTag);
 
     this.source = document.createElement('div');
     this.source.className = 'wg-drag-source';
@@ -343,15 +346,25 @@ class BlockDragView {
       lastX: e.clientX,
       lastY: e.clientY,
       active: false,
+      copy: e.altKey, // 按著 Alt 放開 → 複製一份過去，原本的留著
       target: null,
       ghost: null,
       scrollRaf: 0,
     };
     drag.onMove = (ev) => this.onDragMove(ev);
-    drag.onUp = (ev) => this.endDrag(ev);
+    drag.onUp = (ev) => {
+      // 以放開那一刻有沒有按著 Alt 為準
+      if (this.drag && this.drag.active) this.setCopy(ev.altKey);
+      this.endDrag(ev);
+    };
     drag.onCancel = () => this.endDrag(null);
     drag.onKey = (ev) => {
-      if (ev.key === 'Escape') this.endDrag(null);
+      if (ev.key === 'Escape') return this.endDrag(null);
+      if (ev.key === 'Alt') {
+        // 擋掉 Windows 按 Alt 會跳去選單列的預設行為
+        ev.preventDefault();
+        this.setCopy(ev.type === 'keydown');
+      }
     };
 
     // 截圖工具、切換視窗這類情況會搶走滑鼠，收不到放開的訊號 → 一律取消拖曳，不留半套狀態
@@ -362,6 +375,7 @@ class BlockDragView {
     window.addEventListener('blur', drag.onCancel);
     document.addEventListener('visibilitychange', drag.onCancel);
     window.addEventListener('keydown', drag.onKey, true);
+    window.addEventListener('keyup', drag.onKey, true);
     this.drag = drag;
   }
 
@@ -372,11 +386,13 @@ class BlockDragView {
     if (e.buttons === 0) return this.endDrag(null);
     d.lastX = e.clientX;
     d.lastY = e.clientY;
+    if (d.active && e.altKey !== d.copy) this.setCopy(e.altKey);
 
     if (!d.active) {
       if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
       d.active = true;
       this.beginDragVisuals();
+      this.setCopy(e.altKey);
     }
 
     this.positionGhost();
@@ -444,6 +460,16 @@ class BlockDragView {
       this.drag.scrollRaf = requestAnimationFrame(tick);
     };
     d.scrollRaf = requestAnimationFrame(tick);
+  }
+
+  // 切換搬移／複製：換游標、落點線加「＋ 複製」標籤，並重算落點（複製可以放在原地旁邊）
+  setCopy(on) {
+    const d = this.drag;
+    if (!d) return;
+    d.copy = on;
+    if (!d.active) return;
+    document.body.classList.toggle('wg-block-copying', on);
+    this.updateDropTarget();
   }
 
   positionGhost() {
@@ -563,9 +589,10 @@ class BlockDragView {
 
     const oldIndent = indentOf(doc.line(range.start).text);
     const inPlace = gap === range.start || gap === range.end + 1;
-    if (inPlace && newIndent === oldIndent && targetLevel === movedLevel) return this.clearTarget();
+    if (!d.copy && inPlace && newIndent === oldIndent && targetLevel === movedLevel) return this.clearTarget();
 
     d.target = { gap, newIndent, levelDelta: targetLevel - movedLevel };
+    this.copyTag.style.display = d.copy ? 'block' : 'none';
     if (movedLevel) {
       this.badge.textContent = 'H' + targetLevel;
       this.badge.style.display = 'block';
@@ -655,6 +682,8 @@ class BlockDragView {
     window.removeEventListener('blur', d.onCancel);
     document.removeEventListener('visibilitychange', d.onCancel);
     window.removeEventListener('keydown', d.onKey, true);
+    window.removeEventListener('keyup', d.onKey, true);
+    document.body.classList.remove('wg-block-copying');
     if (d.scrollRaf) cancelAnimationFrame(d.scrollRaf);
     if (d.ghost) d.ghost.remove();
     document.body.classList.remove('wg-block-dragging');
@@ -666,13 +695,14 @@ class BlockDragView {
       this.openMenu(e, d.range);
       return;
     }
-    if (d.target) this.moveBlock(d.range, d.target.gap, d.target.newIndent, d.target.levelDelta);
+    if (d.target) this.moveBlock(d.range, d.target.gap, d.target.newIndent, d.target.levelDelta, d.copy);
   }
 
   // ── 編輯動作 ──
 
   // levelDelta：標題要升降幾級（章節裡的子標題一起調，程式碼區塊裡的 # 不動）
-  moveBlock(range, gap, newIndent, levelDelta = 0) {
+  // copy：複製一份放過去，原本的不動
+  moveBlock(range, gap, newIndent, levelDelta = 0, copy = false) {
     const view = this.view;
     const doc = view.state.doc;
     const { fmEnd, group } = getStructure(doc);
@@ -694,7 +724,7 @@ class BlockDragView {
 
     // 游標不跟著跳進被搬的區塊，免得即時預覽把 ## 、- 這些語法露出來
     // 原地只改縮排
-    if (gap === range.start || gap === range.end + 1) {
+    if (!copy && (gap === range.start || gap === range.end + 1)) {
       view.dispatch({ changes: { from: startLine.from, to: endLine.to, insert: text }, userEvent: 'move.drag' });
       this.flash(startLine.from, startLine.from + text.length);
       return;
@@ -725,9 +755,10 @@ class BlockDragView {
       lead = blankBefore ? 2 : 1;
     }
 
-    const changes = view.state.changes([this.deletionRange(this.removalRange(range)), { from: insPos, insert: insText }]);
+    const insert = { from: insPos, insert: insText };
+    const changes = view.state.changes(copy ? [insert] : [this.deletionRange(this.removalRange(range)), insert]);
     const newFrom = changes.mapPos(insPos, -1) + lead;
-    view.dispatch({ changes, userEvent: 'move.drag' });
+    view.dispatch({ changes, userEvent: copy ? 'input.duplicate' : 'move.drag' });
     this.flash(newFrom, newFrom + text.length);
   }
 

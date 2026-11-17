@@ -162,3 +162,23 @@ body.wg-block-dragging * {
   cursor: grabbing !important;
   user-select: none;
 }
+
+/* 按著 Alt：落點線右端標「＋ 複製」 */
+.wg-drop-copy {
+  position: absolute;
+  right: 0;
+  bottom: 5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  line-height: 1.4;
+  display: none;
+}
+
+body.wg-block-dragging.wg-block-copying,
+body.wg-block-dragging.wg-block-copying * {
+  cursor: copy !important;
+}
