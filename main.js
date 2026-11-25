@@ -290,7 +290,13 @@ class BlockDragView {
 
   // ── 把手 ──
 
+  // 表格儲存格裡的小編輯器（Obsidian 在格子裡另開的編輯器）不出把手
+  inTableCell() {
+    return !!this.view.dom.parentElement && !!this.view.dom.parentElement.closest('.cm-table-widget, table');
+  }
+
   updateHover(e) {
+    if (this.inTableCell()) return this.hideHandle();
     const doc = this.view.state.doc;
     const range = getBlockRange(doc, this.lineAtY(e.clientY).number);
     if (!range) return this.hideHandle();
